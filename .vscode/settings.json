@@ -1,0 +1,19 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "mcp": {
+    "servers": {
+      "mcp-bridge-tool": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["--env-file=/Users/ravi/codekhajana/labs/mcp-bridge-tool/.env", "/Users/ravi/codekhajana/labs/mcp-bridge-tool/dist/index.js"],
+        "env": {
+          "AWS_REGION": "local",
+          "AWS_ACCESS_KEY_ID": "local",
+          "AWS_SECRET_ACCESS_KEY": "local",
+          "DDB_ENDPOINT": "http://localhost:8002",
+          "ANALYST_NAME": "${env:ANALYST_NAME}"
+        }
+      }
+    }
+  }
+}

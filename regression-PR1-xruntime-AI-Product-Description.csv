@@ -1,0 +1,66 @@
+Test ID,Category,Priority,Area,Test Description,Steps,Expected Result,Status,Source
+"REG-001","Security","Critical","Repository / .env-example","Verify no real credentials are committed in example files","1. Open .env-example
+2. Verify all values are placeholders (e.g. YOUR_KEY_HERE)
+3. Run git log to check history for exposed keys","No real API keys, tokens, or credentials present in any committed file","To Test","BLOCKING"
+"REG-002","Security","Critical","Repository / .env-example","Verify no real credentials are committed in example files","1. Open .env-example
+2. Verify all values are placeholders (e.g. YOUR_KEY_HERE)
+3. Run git log to check history for exposed keys","No real API keys, tokens, or credentials present in any committed file","To Test","BLOCKING"
+"REG-003","Billing","High","Billing / Subscription","Verify MONTHLY_PLAN charges recur every 30 days, not one-time","1. Subscribe to the monthly plan
+2. Check Shopify billing API for interval type
+3. Verify BillingInterval is Every30Days
+4. Verify charge recurs on next billing cycle","Monthly plan uses BillingInterval.Every30Days and recurs cyclically","To Test","BLOCKING"
+"REG-004","Functional","High","Process / Traceability","Verify MR is linked to the correct Jira story","1. Open PR description
+2. Verify Jira ticket ID references the correct Shopify AI feature story
+3. Open ticket and confirm scope matches PR changes","MR links to the correct feature ticket (not MCP tooling ticket).","To Test","BLOCKING"
+"REG-005","Billing","High","General","Verify fix for: Dead code in `cancel-subscription.ts`: Code after the `return` statement (`// App logic`) is unreach","1. Reproduce the reported issue
+2. Apply fix
+3. Verify issue no longer occurs","Issue resolved without regression in related features","To Test","BLOCKING"
+"REG-006","Billing","High","General","Verify fix for: `gemini.txt` committed: A raw AI-generated explanation file was accidentally committed to the repo. ","1. Reproduce the reported issue
+2. Apply fix
+3. Verify issue no longer occurs","Issue resolved without regression in related features","To Test","BLOCKING"
+"REG-007","Config","High","General","Verify fix for: `.npmrc` regression: `auto-install-peers`, `shamefully-hoist`, and `enable-pre-post-scripts` were re","1. Reproduce the reported issue
+2. Apply fix
+3. Verify issue no longer occurs","Issue resolved without regression in related features","To Test","BLOCKING"
+"REG-008","Config","High","General","Verify fix for: `shopify.app.ai-product-description.toml` with `application_url = https://example.com`: Placeholder ","1. Reproduce the reported issue
+2. Apply fix
+3. Verify issue no longer occurs","Issue resolved without regression in related features","To Test","BLOCKING"
+"REG-009","Security","High","General","Verify fix for: Worker access token retrieval: `worker.ts` retrieves plaintext `accessToken` from the DB. Acceptable","1. Reproduce the reported issue
+2. Apply fix
+3. Verify issue no longer occurs","Issue resolved without regression in related features","To Test","BLOCKING"
+"REG-010","Billing","High","Billing / Subscription","Verify MONTHLY_PLAN charges recur every 30 days, not one-time","1. Subscribe to the monthly plan
+2. Check Shopify billing API for interval type
+3. Verify BillingInterval is Every30Days
+4. Verify charge recurs on next billing cycle","Monthly plan uses BillingInterval.Every30Days and recurs cyclically","To Test","BLOCKING"
+"REG-011","Smoke","Medium","Config","Smoke test:  — verify core functionality still works after change","1. Navigate to / trigger the Config feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","Config feature works correctly end-to-end","To Test","Changed File"
+"REG-012","Smoke","Medium","settings","Smoke test: settings — verify core functionality still works after change","1. Navigate to / trigger the settings feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","settings feature works correctly end-to-end","To Test","Changed File"
+"REG-013","Smoke","Medium","Onboarding","Smoke test: Onboarding — verify core functionality still works after change","1. Navigate to / trigger the Onboarding feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","Onboarding feature works correctly end-to-end","To Test","Changed File"
+"REG-014","Smoke","Medium","Background Jobs","Smoke test: connection.server — verify core functionality still works after change","1. Navigate to / trigger the Background Jobs feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","Background Jobs feature works correctly end-to-end","To Test","Changed File"
+"REG-015","Smoke","Medium","AI Generation","Smoke test: api.ai-generate-description — verify core functionality still works after change","1. Navigate to / trigger the AI Generation feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","AI Generation feature works correctly end-to-end","To Test","Changed File"
+"REG-016","Smoke","Medium","Billing","Smoke test: api.billing.request — verify core functionality still works after change","1. Navigate to / trigger the Billing feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","Billing feature works correctly end-to-end","To Test","Changed File"
+"REG-017","Smoke","Medium","API Routes","Smoke test: app._index — verify core functionality still works after change","1. Navigate to / trigger the API Routes feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","API Routes feature works correctly end-to-end","To Test","Changed File"
+"REG-018","Smoke","Medium","shopify.server","Smoke test: shopify.server — verify core functionality still works after change","1. Navigate to / trigger the shopify.server feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","shopify.server feature works correctly end-to-end","To Test","Changed File"
+"REG-019","Smoke","Medium","gemini","Smoke test: gemini — verify core functionality still works after change","1. Navigate to / trigger the gemini feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","gemini feature works correctly end-to-end","To Test","Changed File"
+"REG-020","Smoke","Medium","package","Smoke test: package — verify core functionality still works after change","1. Navigate to / trigger the package feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","package feature works correctly end-to-end","To Test","Changed File"
+"REG-021","Smoke","Medium","Database","Smoke test: migration_lock — verify core functionality still works after change","1. Navigate to / trigger the Database feature
+2. Verify basic happy path works
+3. Check no console errors or crashes","Database feature works correctly end-to-end","To Test","Changed File"

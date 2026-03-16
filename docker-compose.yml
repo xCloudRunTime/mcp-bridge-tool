@@ -1,0 +1,33 @@
+# Local DynamoDB for testing — no AWS account needed
+#
+# Start:   docker-compose up -d
+# Stop:    docker-compose down
+# UI:      http://localhost:8001  (dynamodb-admin)
+#
+# .env mein yeh set karo jab local use karo:
+#   DDB_ENDPOINT=http://localhost:8000
+#   AWS_REGION=local
+#   AWS_ACCESS_KEY_ID=local
+#   AWS_SECRET_ACCESS_KEY=local
+
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: mcp-ddb-local
+    ports:
+      - "8002:8000"
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    # Remove "-inMemory" and add volume below if you want data to persist between restarts
+
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin:latest
+    container_name: mcp-ddb-admin
+    ports:
+      - "8003:8001"
+    environment:
+      DYNAMO_ENDPOINT: http://dynamodb-local:8000   # internal port stays 8000
+      AWS_REGION: local
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    depends_on:
+      - dynamodb-local

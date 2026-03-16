@@ -1,0 +1,31 @@
+{
+  "name": "mcp-bridge-tool",
+  "version": "1.0.0",
+  "description": "MCP Server to bridge GitHub/GitLab MR data and Jira ticket details for AI-assisted code review",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node --esm src/index.ts",
+    "watch": "tsc --watch",
+    "test:ddb": "node --loader ts-node/esm scripts/test-server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "setup": "bash scripts/setup.sh"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1009.0",
+    "@aws-sdk/lib-dynamodb": "^3.1009.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.0"
+  }
+}
