@@ -175,6 +175,137 @@ function buildDiffSummary(files: ChangedFile[]): string {
   return lines.join("\n");
 }
 
+// ---------------------------------------------------------------
+// Inline Review Comments
+// ---------------------------------------------------------------
+
+export interface InlineComment {
+  path: string;       // File path (relative to repo root)
+  line: number;       // Line number in the file (new version)
+  body: string;       // Comment text
+}
+
+export interface InlineReviewResult {
+  platform: "github" | "gitlab";
+  review_id?: number;
+  comment_count: number;
+  html_url?: string;
+}
+
+/**
+ * Post inline review comments on a GitHub PR or GitLab MR.
+ * Each comment is anchored to a specific file + line number.
+ */
+export async function postInlineReviewComments(
+  mrId: string,
+  repo: string,
+  comments: InlineComment[],
+  platform: "github" | "gitlab" = "github",
+  reviewBody = "AI Code Review — inline annotations"
+): Promise<InlineReviewResult> {
+  if (platform === "gitlab") {
+    return postGitLabInlineComments(mrId, repo, comments);
+  }
+  return postGitHubInlineComments(mrId, repo, comments, reviewBody);
+}
+
+async function postGitHubInlineComments(
+  prNumber: string,
+  repo: string,
+  comments: InlineComment[],
+  reviewBody: string
+): Promise<InlineReviewResult> {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) throw new Error("GITHUB_TOKEN .env mein set nahi hai.");
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+
+  // GitHub Review API expects commit_id — fetch the latest commit SHA
+  const prRes = await axios.get(
+    `https://api.github.com/repos/${repo}/pulls/${prNumber}`,
+    { headers }
+  );
+  const commitId: string = prRes.data.head?.sha ?? "";
+
+  const reviewComments = comments.map((c) => ({
+    path: c.path,
+    line: c.line,
+    side: "RIGHT",
+    body: c.body,
+  }));
+
+  const reviewRes = await axios.post(
+    `https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews`,
+    {
+      commit_id: commitId,
+      body: reviewBody,
+      event: "COMMENT",
+      comments: reviewComments,
+    },
+    { headers }
+  );
+
+  return {
+    platform: "github",
+    review_id: reviewRes.data.id,
+    comment_count: reviewComments.length,
+    html_url: reviewRes.data.html_url,
+  };
+}
+
+async function postGitLabInlineComments(
+  mrIid: string,
+  repo: string,
+  comments: InlineComment[]
+): Promise<InlineReviewResult> {
+  const token = process.env.GITLAB_TOKEN;
+  const baseUrl = process.env.GITLAB_BASE_URL ?? "https://gitlab.com";
+  if (!token) throw new Error("GITLAB_TOKEN .env mein set nahi hai.");
+
+  const encodedRepo = encodeURIComponent(repo);
+  const headers = { "PRIVATE-TOKEN": token };
+  const apiBase = `${baseUrl}/api/v4/projects/${encodedRepo}/merge_requests/${mrIid}`;
+
+  // Fetch MR version info to get base_commit_sha and start_commit_sha
+  const versionsRes = await axios.get(`${apiBase}/versions`, { headers });
+  const latestVersion = versionsRes.data[0];
+  const baseSha: string = latestVersion?.base_commit_sha ?? "";
+  const startSha: string = latestVersion?.start_commit_sha ?? "";
+  const headSha: string = latestVersion?.head_commit_sha ?? "";
+
+  // Post each comment as a separate discussion
+  const results = await Promise.allSettled(
+    comments.map((c) =>
+      axios.post(
+        `${apiBase}/discussions`,
+        {
+          body: c.body,
+          position: {
+            position_type: "text",
+            base_sha: baseSha,
+            start_sha: startSha,
+            head_sha: headSha,
+            new_path: c.path,
+            new_line: c.line,
+          },
+        },
+        { headers }
+      )
+    )
+  );
+
+  const successCount = results.filter((r) => r.status === "fulfilled").length;
+
+  return {
+    platform: "gitlab",
+    comment_count: successCount,
+  };
+}
+
 // Raw API response types (partial — sirf jo fields chahiye)
 interface GithubFile {
   filename: string;

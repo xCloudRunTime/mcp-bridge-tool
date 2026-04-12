@@ -10,9 +10,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import "dotenv/config";
 
-import { fetchMergeRequestDetails } from "./git-tool.js";
+import { fetchMergeRequestDetails, postInlineReviewComments, type InlineComment } from "./git-tool.js";
 import { fetchJiraTicket, postReviewToJira, type JiraTicketDetails } from "./jira-tool.js";
 import { generateRegressionSheet } from "./regression-tool.js";
+import { postReviewToSlack } from "./slack-tool.js";
+import { exportRegressionToSheets, exportDashboardToSheets } from "./sheets-tool.js";
+import { saveReportToDrive } from "./drive-tool.js";
 import {
   ensureTableExists,
   saveAnalysis,
@@ -244,6 +247,112 @@ const TOOLS: Tool[] = [
       required: ["mr_id", "repo"],
     },
   },
+  // ── 10. Post Review to Slack ──────────────────────────────
+  {
+    name: "post_review_to_slack",
+    description:
+      "MR review result ko Slack channel mein post karta hai via Incoming Webhook. " +
+      "Team ko instantly notify karta hai — ready-to-merge verdict, MR link, aur review summary ke saath. " +
+      "save_mr_analysis ke baad call karo.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mr_id:          { type: "string", description: "MR / PR number" },
+        repo:           { type: "string", description: "owner/repo" },
+        platform:       { type: "string", enum: ["github", "gitlab"] },
+        mr_title:       { type: "string", description: "MR title (optional, auto-fetch hoga)" },
+        jira_key:       { type: "string", description: "Linked Jira ticket ID (optional)" },
+        analyst:        { type: "string", description: "Reviewer ka naam (default: ANALYST_NAME env)" },
+        review_summary: { type: "string", description: "Review text jo Slack mein dikhega" },
+        ready_to_merge: { type: "boolean", description: "Merge verdict" },
+      },
+      required: ["mr_id", "repo", "review_summary", "ready_to_merge"],
+    },
+  },
+  // ── 11. Post Inline Review Comments ──────────────────────
+  {
+    name: "post_inline_review_comments",
+    description:
+      "GitHub PR ya GitLab MR par line-by-line inline review comments post karta hai. " +
+      "Har comment ek specific file aur line number se attach hota hai — " +
+      "code ke andar directly annotations milti hain.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mr_id:    { type: "string", description: "MR / PR number" },
+        repo:     { type: "string", description: "owner/repo" },
+        platform: { type: "string", enum: ["github", "gitlab"] },
+        comments: {
+          type: "array",
+          description: "Inline comments list",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "File path (e.g. 'src/auth.ts')" },
+              line: { type: "number", description: "Line number in the file" },
+              body: { type: "string", description: "Comment text" },
+            },
+            required: ["path", "line", "body"],
+          },
+        },
+        review_body: {
+          type: "string",
+          description: "Overall review summary (shown as PR review header)",
+        },
+      },
+      required: ["mr_id", "repo", "comments"],
+    },
+  },
+  // ── 12. Export to Google Sheets ───────────────────────────
+  {
+    name: "export_to_google_sheets",
+    description:
+      "MR analysis data ya regression tests ko Google Sheets mein export karta hai. " +
+      "mode='regression_tests': test cases ek dedicated tab mein. " +
+      "mode='team_dashboard': team ka poora dashboard ek tab mein overwrite karta hai.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["regression_tests", "team_dashboard"],
+          description: "Export mode: regression_tests ya team_dashboard",
+        },
+        mr_id:    { type: "string", description: "MR number (regression_tests mode ke liye)" },
+        repo:     { type: "string", description: "owner/repo (regression_tests mode ke liye)" },
+        platform: { type: "string", enum: ["github", "gitlab"] },
+        spreadsheet_id: {
+          type: "string",
+          description: "Google Sheets spreadsheet ID (optional, GOOGLE_SHEET_ID env se override)",
+        },
+        limit: {
+          type: "number",
+          description: "team_dashboard mode: kitne records (default 50)",
+        },
+      },
+      required: ["mode"],
+    },
+  },
+  // ── 13. Save Report to Google Drive ──────────────────────
+  {
+    name: "save_report_to_drive",
+    description:
+      "MR review report ko Google Drive folder mein Markdown file ke roop mein save karta hai. " +
+      "Permanent record ban jaata hai jo Drive se share kiya ja sakta hai.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mr_id:     { type: "string", description: "MR / PR number" },
+        repo:      { type: "string", description: "owner/repo" },
+        platform:  { type: "string", enum: ["github", "gitlab"] },
+        folder_id: {
+          type: "string",
+          description: "Google Drive folder ID (optional, GOOGLE_DRIVE_FOLDER_ID env se override)",
+        },
+      },
+      required: ["mr_id", "repo"],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------
@@ -291,6 +400,62 @@ const SKILLS: Prompt[] = [
       { name: "mr_id", description: "MR number", required: true },
       { name: "repo", description: "owner/repo", required: true },
       { name: "platform", description: "github ya gitlab", required: false },
+    ],
+  },
+  // ── Tech-Stack Skills ────────────────────────────────────
+  {
+    name: "react-pr-review",
+    description:
+      "React / Next.js PR ka specialized review: hooks rules, re-render performance, " +
+      "accessibility (a11y), SSR/SSG correctness, aur component structure.",
+    arguments: [
+      { name: "mr_id", description: "PR number", required: true },
+      { name: "repo", description: "owner/repo", required: true },
+      { name: "platform", description: "github ya gitlab (default: github)", required: false },
+    ],
+  },
+  {
+    name: "node-api-review",
+    description:
+      "Node.js / Express / Fastify API PR ka review: authentication, input validation, " +
+      "error handling, async/await correctness, aur security (injection, rate limiting).",
+    arguments: [
+      { name: "mr_id", description: "PR number", required: true },
+      { name: "repo", description: "owner/repo", required: true },
+      { name: "platform", description: "github ya gitlab (default: github)", required: false },
+    ],
+  },
+  {
+    name: "python-review",
+    description:
+      "Python PR ka review: type hints, PEP-8 compliance, test coverage, " +
+      "dependency safety, aur common anti-patterns (mutable defaults, bare excepts).",
+    arguments: [
+      { name: "mr_id", description: "PR number", required: true },
+      { name: "repo", description: "owner/repo", required: true },
+      { name: "platform", description: "github ya gitlab (default: github)", required: false },
+    ],
+  },
+  {
+    name: "security-review",
+    description:
+      "Security-focused PR review: OWASP Top 10 check, secrets/credentials exposure, " +
+      "injection vulnerabilities (SQL, command, XSS), auth/authz issues, aur dependency CVEs.",
+    arguments: [
+      { name: "mr_id", description: "PR number", required: true },
+      { name: "repo", description: "owner/repo", required: true },
+      { name: "platform", description: "github ya gitlab (default: github)", required: false },
+    ],
+  },
+  {
+    name: "db-migration-review",
+    description:
+      "Database migration PR ka review: rollback safety, data loss risk, index impact, " +
+      "locking behavior on large tables, aur backward compatibility.",
+    arguments: [
+      { name: "mr_id", description: "PR number", required: true },
+      { name: "repo", description: "owner/repo", required: true },
+      { name: "platform", description: "github ya gitlab (default: github)", required: false },
     ],
   },
 ];
@@ -405,6 +570,147 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
                 `   ### Issues Found\n` +
                 `   ### Verdict: ✅ Ready to Merge / ❌ Needs Changes\n` +
                 `3. Call save_mr_analysis with the review results`,
+            },
+          },
+        ],
+      };
+    }
+
+    case "react-pr-review": {
+      const mrId = args?.mr_id ?? "<MR_ID>";
+      const repo = args?.repo ?? "<owner/repo>";
+      const platform = args?.platform ?? "github";
+      return {
+        description: "React/Next.js specialized PR review",
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text:
+                `Do a React/Next.js specialized review of PR #${mrId} in ${repo} (${platform}).\n\n` +
+                `1. Call analyze_merge_request with mr_id="${mrId}", repo="${repo}", platform="${platform}"\n` +
+                `2. Review the diff with focus on:\n` +
+                `   - **Hooks rules**: No conditional hooks, correct dependency arrays in useEffect/useMemo/useCallback\n` +
+                `   - **Re-render performance**: Missing React.memo, unnecessary state, prop drilling\n` +
+                `   - **Accessibility (a11y)**: Missing ARIA labels, keyboard navigation, color contrast\n` +
+                `   - **SSR/SSG correctness**: Window/document usage without guards, hydration mismatches\n` +
+                `   - **Component structure**: Oversized components, missing error boundaries\n` +
+                `3. Report: list each issue with file path + line number, severity (Critical/High/Medium/Low)\n` +
+                `4. Call save_mr_analysis with your verdict`,
+            },
+          },
+        ],
+      };
+    }
+
+    case "node-api-review": {
+      const mrId = args?.mr_id ?? "<MR_ID>";
+      const repo = args?.repo ?? "<owner/repo>";
+      const platform = args?.platform ?? "github";
+      return {
+        description: "Node.js API specialized PR review",
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text:
+                `Do a Node.js API specialized review of PR #${mrId} in ${repo} (${platform}).\n\n` +
+                `1. Call analyze_merge_request with mr_id="${mrId}", repo="${repo}", platform="${platform}"\n` +
+                `2. Review the diff with focus on:\n` +
+                `   - **Authentication**: Missing auth middleware, JWT verification, session handling\n` +
+                `   - **Input validation**: Unvalidated user input, missing sanitization, schema checks\n` +
+                `   - **Error handling**: Unhandled promise rejections, missing try/catch, error leakage\n` +
+                `   - **Async correctness**: Uncaught async errors, blocking operations in event loop\n` +
+                `   - **Security**: SQL/command injection, path traversal, rate limiting missing\n` +
+                `3. Report: list each issue with file path + line number, severity (Critical/High/Medium/Low)\n` +
+                `4. Call save_mr_analysis with your verdict`,
+            },
+          },
+        ],
+      };
+    }
+
+    case "python-review": {
+      const mrId = args?.mr_id ?? "<MR_ID>";
+      const repo = args?.repo ?? "<owner/repo>";
+      const platform = args?.platform ?? "github";
+      return {
+        description: "Python specialized PR review",
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text:
+                `Do a Python specialized review of PR #${mrId} in ${repo} (${platform}).\n\n` +
+                `1. Call analyze_merge_request with mr_id="${mrId}", repo="${repo}", platform="${platform}"\n` +
+                `2. Review the diff with focus on:\n` +
+                `   - **Type hints**: Missing annotations, incorrect types, untyped function signatures\n` +
+                `   - **PEP-8**: Naming conventions, line length, import ordering\n` +
+                `   - **Test coverage**: New code without tests, missing edge case tests\n` +
+                `   - **Common anti-patterns**: Mutable default arguments, bare except, broad imports\n` +
+                `   - **Dependency safety**: New packages added, version pinning, known vulnerabilities\n` +
+                `3. Report: list each issue with file path + line number, severity (Critical/High/Medium/Low)\n` +
+                `4. Call save_mr_analysis with your verdict`,
+            },
+          },
+        ],
+      };
+    }
+
+    case "security-review": {
+      const mrId = args?.mr_id ?? "<MR_ID>";
+      const repo = args?.repo ?? "<owner/repo>";
+      const platform = args?.platform ?? "github";
+      return {
+        description: "Security-focused PR review (OWASP Top 10)",
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text:
+                `Do a security-focused review of PR #${mrId} in ${repo} (${platform}).\n\n` +
+                `1. Call analyze_merge_request with mr_id="${mrId}", repo="${repo}", platform="${platform}"\n` +
+                `2. Review the diff with focus on OWASP Top 10:\n` +
+                `   - **A01 Broken Access Control**: Missing authz checks, IDOR, privilege escalation\n` +
+                `   - **A02 Crypto Failures**: Plaintext secrets, weak hashing (MD5/SHA1), hardcoded keys\n` +
+                `   - **A03 Injection**: SQL, command, LDAP, XSS injection vectors\n` +
+                `   - **A05 Security Misconfiguration**: Debug mode, CORS wildcard, open redirects\n` +
+                `   - **A07 Auth Failures**: Weak passwords, missing MFA, insecure session management\n` +
+                `   - **Secrets exposure**: API keys, tokens, passwords in code or env files committed\n` +
+                `3. Rate every finding as Critical/High/Medium/Low — BLOCK merge on any Critical\n` +
+                `4. Call save_mr_analysis with ready_to_merge=false if any Critical issues found`,
+            },
+          },
+        ],
+      };
+    }
+
+    case "db-migration-review": {
+      const mrId = args?.mr_id ?? "<MR_ID>";
+      const repo = args?.repo ?? "<owner/repo>";
+      const platform = args?.platform ?? "github";
+      return {
+        description: "Database migration safety review",
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text:
+                `Do a database migration safety review of PR #${mrId} in ${repo} (${platform}).\n\n` +
+                `1. Call analyze_merge_request with mr_id="${mrId}", repo="${repo}", platform="${platform}"\n` +
+                `2. Review migration files with focus on:\n` +
+                `   - **Rollback safety**: Is there a corresponding down migration? Can it be reverted safely?\n` +
+                `   - **Data loss risk**: DROP TABLE/COLUMN, TRUNCATE, irreversible transforms\n` +
+                `   - **Locking**: ALTER TABLE on large tables causes lock — is this planned for off-hours?\n` +
+                `   - **Index impact**: New indexes on large tables, missing indexes on foreign keys\n` +
+                `   - **Backward compatibility**: New NOT NULL columns without defaults break old code\n` +
+                `3. Mark as Critical if data loss or unrecoverable state is possible\n` +
+                `4. Call save_mr_analysis with your verdict and rollback instructions`,
             },
           },
         ],
@@ -743,6 +1049,187 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               test_cases: sheet.test_cases,
               csv: sheet.csv,
               instructions: "CSV column ko copy karke Google Sheets → File → Import mein paste karo, ya .csv file mein save karke Excel mein kholo.",
+            }, null, 2),
+          }],
+        };
+      }
+
+      // ── Tool 10: Post Review to Slack ───────────────────────
+      case "post_review_to_slack": {
+        const mrId         = String(args?.mr_id ?? "");
+        const repo         = String(args?.repo ?? "");
+        const platform     = (args?.platform as "github" | "gitlab") ?? "github";
+        const reviewSummary = String(args?.review_summary ?? "");
+        const readyToMerge  = Boolean(args?.ready_to_merge);
+        const jiraKey      = args?.jira_key ? String(args.jira_key) : null;
+        const analyst      = args?.analyst
+          ? String(args.analyst)
+          : (process.env.ANALYST_NAME ?? "AI-Copilot");
+
+        if (!mrId || !repo || !reviewSummary)
+          return errorResponse("mr_id, repo aur review_summary required hain.");
+
+        // Fetch MR to get title + URL
+        let mrTitle = args?.mr_title ? String(args.mr_title) : "";
+        let mrUrl = "";
+        if (!mrTitle) {
+          const mrData = await fetchMergeRequestDetails(mrId, repo, platform);
+          mrTitle = mrData.title;
+          mrUrl = mrData.raw_url;
+        } else {
+          mrUrl = platform === "github"
+            ? `https://github.com/${repo}/pull/${mrId}`
+            : `${process.env.GITLAB_BASE_URL ?? "https://gitlab.com"}/${repo}/-/merge_requests/${mrId}`;
+        }
+
+        const jiraUrl = jiraKey && process.env.JIRA_BASE_URL
+          ? `${process.env.JIRA_BASE_URL}/browse/${jiraKey}`
+          : null;
+
+        const result = await postReviewToSlack({
+          mr_title: mrTitle,
+          mr_url: mrUrl,
+          repo,
+          mr_id: mrId,
+          jira_key: jiraKey,
+          jira_url: jiraUrl,
+          analyst,
+          ready_to_merge: readyToMerge,
+          review_summary: reviewSummary,
+          platform,
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              posted: result.ok,
+              verdict: readyToMerge ? "READY TO MERGE" : "NEEDS CHANGES",
+              message: "Review notification Slack mein post ho gaya.",
+            }, null, 2),
+          }],
+        };
+      }
+
+      // ── Tool 11: Post Inline Review Comments ────────────────
+      case "post_inline_review_comments": {
+        const mrId      = String(args?.mr_id ?? "");
+        const repo      = String(args?.repo ?? "");
+        const platform  = (args?.platform as "github" | "gitlab") ?? "github";
+        const comments  = (args?.comments ?? []) as InlineComment[];
+        const reviewBody = args?.review_body
+          ? String(args.review_body)
+          : "AI Code Review — inline annotations";
+
+        if (!mrId || !repo)
+          return errorResponse("mr_id aur repo required hain.");
+        if (!Array.isArray(comments) || comments.length === 0)
+          return errorResponse("comments array empty nahi hona chahiye.");
+
+        const result = await postInlineReviewComments(
+          mrId, repo, comments, platform, reviewBody
+        );
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              posted: true,
+              platform: result.platform,
+              review_id: result.review_id,
+              comment_count: result.comment_count,
+              html_url: result.html_url,
+              message: `${result.comment_count} inline comments ${platform === "github" ? "PR" : "MR"} par post ho gaye.`,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // ── Tool 12: Export to Google Sheets ────────────────────
+      case "export_to_google_sheets": {
+        const mode = String(args?.mode ?? "regression_tests") as "regression_tests" | "team_dashboard";
+        const spreadsheetId = args?.spreadsheet_id ? String(args.spreadsheet_id) : undefined;
+
+        if (mode === "regression_tests") {
+          const mrId    = String(args?.mr_id ?? "");
+          const repo    = String(args?.repo ?? "");
+          const platform = (args?.platform as "github" | "gitlab") ?? "github";
+
+          if (!mrId || !repo)
+            return errorResponse("regression_tests mode ke liye mr_id aur repo required hain.");
+
+          const record = await getLatestAnalysis(platform, repo, mrId);
+          if (!record)
+            return errorResponse(`No saved analysis found for ${platform}#${repo}#${mrId}. Pehle save_mr_analysis call karo.`);
+
+          const sheet = generateRegressionSheet(record);
+          const result = await exportRegressionToSheets(sheet, spreadsheetId);
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                exported: true,
+                spreadsheet_id: result.spreadsheetId,
+                sheet_title: result.sheetTitle,
+                updated_range: result.updatedRange,
+                rows_written: result.rowsWritten,
+                message: `${result.rowsWritten} regression test rows Google Sheets tab '${result.sheetTitle}' mein export ho gaye.`,
+              }, null, 2),
+            }],
+          };
+        }
+
+        // team_dashboard mode
+        const limit = Math.min(Number(args?.limit ?? 50), 100);
+        const records = await listRecentAnalyses({ limit });
+
+        if (records.length === 0)
+          return { content: [{ type: "text", text: "Koi analysis nahi mila. save_mr_analysis se pehle save karo." }] };
+
+        const result = await exportDashboardToSheets(records, spreadsheetId);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              exported: true,
+              spreadsheet_id: result.spreadsheetId,
+              sheet_title: result.sheetTitle,
+              updated_range: result.updatedRange,
+              rows_written: result.rowsWritten,
+              message: `Team dashboard — ${result.rowsWritten} MR records Google Sheets tab '${result.sheetTitle}' mein export ho gaye.`,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // ── Tool 13: Save Report to Google Drive ────────────────
+      case "save_report_to_drive": {
+        const mrId     = String(args?.mr_id ?? "");
+        const repo     = String(args?.repo ?? "");
+        const platform = (args?.platform as "github" | "gitlab") ?? "github";
+        const folderId = args?.folder_id ? String(args.folder_id) : undefined;
+
+        if (!mrId || !repo)
+          return errorResponse("mr_id aur repo required hain.");
+
+        const record = await getLatestAnalysis(platform, repo, mrId);
+        if (!record)
+          return errorResponse(`No saved analysis found for ${platform}#${repo}#${mrId}. Pehle save_mr_analysis call karo.`);
+
+        const result = await saveReportToDrive(record, folderId);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              saved: true,
+              file_id: result.fileId,
+              file_name: result.fileName,
+              web_view_link: result.webViewLink,
+              folder_id: result.folderId,
+              message: `Review report '${result.fileName}' Google Drive mein save ho gaya. Link: ${result.webViewLink}`,
             }, null, 2),
           }],
         };
