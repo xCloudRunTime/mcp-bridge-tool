@@ -140,6 +140,46 @@ describe("fetchMergeRequestDetails — GitHub", () => {
       fetchMergeRequestDetails("9999", "acme/backend-api", "github")
     ).rejects.toThrow();
   });
+
+  it("paginates when Link header contains rel=next", async () => {
+    const page1Files = Array.from({ length: 100 }, (_, i) => ({
+      filename: `src/file-${i}.ts`,
+      status: "modified",
+      additions: 1,
+      deletions: 1,
+      patch: "+line",
+    }));
+    const page2Files = [
+      { filename: "src/extra.ts", status: "added", additions: 5, deletions: 0, patch: "+extra" },
+    ];
+
+    mockedAxios.get
+      .mockResolvedValueOnce(GITHUB_PR_RESPONSE)             // PR info
+      .mockResolvedValueOnce({                                // page 1 with next link
+        data: page1Files,
+        headers: { link: '<https://api.github.com/...?page=2>; rel="next"' },
+      })
+      .mockResolvedValueOnce({ data: page2Files });           // page 2 (no next link)
+
+    const result = await fetchMergeRequestDetails("42", "acme/backend-api", "github");
+
+    expect(result.changed_files).toHaveLength(101);
+    expect(result.changed_files[100].filename).toBe("src/extra.ts");
+  });
+
+  it("truncates patch longer than MAX_PATCH_CHARS and adds notice", async () => {
+    const longPatch = "+".repeat(4000);
+    mockedAxios.get
+      .mockResolvedValueOnce(GITHUB_PR_RESPONSE)
+      .mockResolvedValueOnce({
+        data: [{ filename: "big.ts", status: "modified", additions: 200, deletions: 0, patch: longPatch }],
+      });
+
+    const result = await fetchMergeRequestDetails("42", "acme/backend-api", "github");
+
+    expect(result.changed_files[0].patch).toContain("... [diff truncated]");
+    expect(result.changed_files[0].patch!.length).toBeLessThan(longPatch.length);
+  });
 });
 
 describe("fetchMergeRequestDetails — GitLab", () => {
@@ -163,6 +203,57 @@ describe("fetchMergeRequestDetails — GitLab", () => {
     expect(result.source_branch).toBe("fix/null-payment");
     expect(result.changed_files).toHaveLength(1);
     expect(result.changed_files[0].filename).toBe("src/payment/processor.ts");
+  });
+
+  it("calculates additions and deletions from GitLab diff lines", async () => {
+    const changesWithDiff = {
+      data: {
+        changes: [{
+          new_path: "src/service.ts",
+          old_path: "src/service.ts",
+          new_file: false,
+          deleted_file: false,
+          diff: [
+            "@@ -10,6 +10,8 @@",
+            " unchanged line",
+            "-removed line 1",
+            "-removed line 2",
+            "+added line 1",
+            "+added line 2",
+            "+added line 3",
+          ].join("\n"),
+        }],
+      },
+    };
+
+    mockedAxios.get
+      .mockResolvedValueOnce(GITLAB_MR_RESPONSE)
+      .mockResolvedValueOnce(changesWithDiff);
+
+    const result = await fetchMergeRequestDetails("7", "acme/payments-api", "gitlab");
+
+    expect(result.changed_files[0].additions).toBe(3);
+    expect(result.changed_files[0].deletions).toBe(2);
+  });
+
+  it("marks new files as status: added, deleted files as status: removed", async () => {
+    const changesWithNewAndDeleted = {
+      data: {
+        changes: [
+          { new_path: "new.ts", old_path: "new.ts", new_file: true, deleted_file: false, diff: "+line" },
+          { new_path: "old.ts", old_path: "old.ts", new_file: false, deleted_file: true, diff: "-line" },
+        ],
+      },
+    };
+
+    mockedAxios.get
+      .mockResolvedValueOnce(GITLAB_MR_RESPONSE)
+      .mockResolvedValueOnce(changesWithNewAndDeleted);
+
+    const result = await fetchMergeRequestDetails("7", "acme/payments-api", "gitlab");
+
+    expect(result.changed_files[0].status).toBe("added");
+    expect(result.changed_files[1].status).toBe("removed");
   });
 
   it("defaults to platform: github when not specified", async () => {

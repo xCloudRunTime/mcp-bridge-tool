@@ -59,6 +59,21 @@ export interface ListAnalysesOptions {
 }
 
 // ---------------------------------------------------------------
+// Projection — list/search queries mein heavy snapshot fields skip karo
+// mr_snapshot and jira_snapshot combined can be 60KB+ per record
+// ---------------------------------------------------------------
+const SUMMARY_FIELDS = [
+  "mr_key", "analyzed_at", "analyst",
+  "#repo", "platform", "mr_id", "mr_title",
+  "jira_key", "jira_summary", "ready_to_merge", "review_summary",
+];
+
+const SUMMARY_PROJECTION = {
+  ProjectionExpression: SUMMARY_FIELDS.join(", "),
+  ExpressionAttributeNames: { "#repo": "repo" } as Record<string, string>,
+};
+
+// ---------------------------------------------------------------
 // DynamoDB Client (singleton)
 // ---------------------------------------------------------------
 function buildClient(): DynamoDBDocumentClient {
@@ -223,12 +238,12 @@ export async function listRecentAnalyses(
     return items;
   }
 
-  // No analyst filter: full scan (chote teams ke liye theek hai)
-  // NOTE: Production mein zyada data hone par date-based GSI add karna better hoga
+  // No analyst filter: full scan with projection (mr_snapshot/jira_snapshot skip karo)
   const result = await getClient().send(
     new ScanCommand({
       TableName: TABLE(),
       Limit: limit * 3,   // Scan zyada laata hai, hum baad mein sort karke cut karenge
+      ...SUMMARY_PROJECTION,
     })
   );
 
@@ -327,7 +342,8 @@ export async function searchAnalyses(
     return (result.Items ?? []) as AnalysisRecord[];
   }
 
-  // No analyst — full table scan with filters
+  // No analyst — full table scan with filters (mr_snapshot/jira_snapshot skip)
+  const mergedNames = { ...SUMMARY_PROJECTION.ExpressionAttributeNames, ...exprNames };
   const result = await getClient().send(
     new ScanCommand({
       TableName: TABLE(),
@@ -337,9 +353,10 @@ export async function searchAnalyses(
       ...(Object.keys(exprValues).length > 0
         ? { ExpressionAttributeValues: exprValues }
         : {}),
-      ...(Object.keys(exprNames).length > 0
-        ? { ExpressionAttributeNames: exprNames }
+      ...(Object.keys(mergedNames).length > 0
+        ? { ExpressionAttributeNames: mergedNames }
         : {}),
+      ProjectionExpression: SUMMARY_PROJECTION.ProjectionExpression,
     })
   );
 
