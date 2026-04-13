@@ -7,6 +7,7 @@
  */
 
 import axios from "axios";
+import { withRetry } from "./retry.js";
 
 // ---------------------------------------------------------------
 // Types
@@ -42,9 +43,9 @@ export async function postReviewToSlack(
 
   const blocks = buildSlackBlocks(payload);
 
-  await axios.post(webhookUrl, { blocks }, {
+  await withRetry(() => axios.post(webhookUrl, { blocks }, {
     headers: { "Content-Type": "application/json" },
-  });
+  }));
 
   return { ok: true };
 }

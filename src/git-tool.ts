@@ -7,6 +7,7 @@
  */
 
 import axios from "axios";
+import { withRetry } from "./retry.js";
 
 // ---------------------------------------------------------------
 // Types
@@ -72,8 +73,8 @@ async function fetchFromGitHub(
 
   // Parallel calls: PR info + files list
   const [prRes, filesRes] = await Promise.all([
-    axios.get(baseUrl, { headers }),
-    axios.get(`${baseUrl}/files`, { headers }),
+    withRetry(() => axios.get(baseUrl, { headers })),
+    withRetry(() => axios.get(`${baseUrl}/files`, { headers })),
   ]);
 
   const pr = prRes.data;
@@ -122,8 +123,8 @@ async function fetchFromGitLab(
 
   // Parallel calls: MR info + changes (diff)
   const [mrRes, changesRes] = await Promise.all([
-    axios.get(apiBase, { headers }),
-    axios.get(`${apiBase}/changes`, { headers }),
+    withRetry(() => axios.get(apiBase, { headers })),
+    withRetry(() => axios.get(`${apiBase}/changes`, { headers })),
   ]);
 
   const mr = mrRes.data;
@@ -225,9 +226,8 @@ async function postGitHubInlineComments(
   };
 
   // GitHub Review API expects commit_id — fetch the latest commit SHA
-  const prRes = await axios.get(
-    `https://api.github.com/repos/${repo}/pulls/${prNumber}`,
-    { headers }
+  const prRes = await withRetry(() =>
+    axios.get(`https://api.github.com/repos/${repo}/pulls/${prNumber}`, { headers })
   );
   const commitId: string = prRes.data.head?.sha ?? "";
 
@@ -238,15 +238,12 @@ async function postGitHubInlineComments(
     body: c.body,
   }));
 
-  const reviewRes = await axios.post(
-    `https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews`,
-    {
-      commit_id: commitId,
-      body: reviewBody,
-      event: "COMMENT",
-      comments: reviewComments,
-    },
-    { headers }
+  const reviewRes = await withRetry(() =>
+    axios.post(
+      `https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews`,
+      { commit_id: commitId, body: reviewBody, event: "COMMENT", comments: reviewComments },
+      { headers }
+    )
   );
 
   return {
@@ -271,7 +268,7 @@ async function postGitLabInlineComments(
   const apiBase = `${baseUrl}/api/v4/projects/${encodedRepo}/merge_requests/${mrIid}`;
 
   // Fetch MR version info to get base_commit_sha and start_commit_sha
-  const versionsRes = await axios.get(`${apiBase}/versions`, { headers });
+  const versionsRes = await withRetry(() => axios.get(`${apiBase}/versions`, { headers }));
   const latestVersion = versionsRes.data[0];
   const baseSha: string = latestVersion?.base_commit_sha ?? "";
   const startSha: string = latestVersion?.start_commit_sha ?? "";
@@ -280,7 +277,7 @@ async function postGitLabInlineComments(
   // Post each comment as a separate discussion
   const results = await Promise.allSettled(
     comments.map((c) =>
-      axios.post(
+      withRetry(() => axios.post(
         `${apiBase}/discussions`,
         {
           body: c.body,
@@ -294,7 +291,7 @@ async function postGitLabInlineComments(
           },
         },
         { headers }
-      )
+      ))
     )
   );
 

@@ -11,6 +11,7 @@
  */
 
 import axios from "axios";
+import { withRetry } from "./retry.js";
 
 // ---------------------------------------------------------------
 // Types
@@ -147,7 +148,7 @@ export async function postReviewToJira(
     },
   };
 
-  const response = await axios.post(url, body, { auth, headers });
+  const response = await withRetry(() => axios.post(url, body, { auth, headers }));
   const commentId: string = response.data.id;
 
   return {
@@ -198,10 +199,10 @@ export async function fetchJiraTicket(ticketId: string): Promise<JiraTicketDetai
     "comment",
   ].join(",");
 
-  const response = await axios.get(`${url}?fields=${fields}`, {
+  const response = await withRetry(() => axios.get(`${url}?fields=${fields}`, {
     auth,
     headers,
-  });
+  }));
 
   return parseJiraResponse(response.data, baseUrl);
 }
