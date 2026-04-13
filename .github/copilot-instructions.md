@@ -1,6 +1,6 @@
 # MCP Bridge Tool — Copilot Instructions
 
-You have access to the `mcp-bridge-tool` MCP server with 7 tools for reviewing GitHub/GitLab Merge Requests against Jira tickets and saving results to DynamoDB for team visibility.
+You have access to the `mcp-bridge-tool` MCP server with **13 tools** for reviewing GitHub/GitLab Merge Requests against Jira tickets, posting inline code comments, notifying Slack, exporting to Google Sheets/Drive, and saving results to DynamoDB for team visibility.
 
 ## When to Use These Tools
 
@@ -9,6 +9,9 @@ Automatically invoke these tools when the user:
 - Asks to "review", "analyze", or "check" a merge request
 - Pastes a GitHub/GitLab MR URL
 - Asks to see team review history or who reviewed what
+- Mentions "post to Slack", "notify the team", or "send to channel"
+- Asks for "inline comments" or "annotate the code"
+- Asks to "export to Sheets", "save to Drive", or "generate test cases"
 
 ---
 
@@ -39,6 +42,21 @@ Always call `save_mr_analysis` after completing the review.
 
 ---
 
+## Notification & Export (Optional Steps)
+
+After saving the review, the user may ask for one or more of these:
+
+| User asks... | Tool to call |
+|---|---|
+| "Post to Slack" / "Notify the team" | `post_review_to_slack` |
+| "Add inline comments" / "Annotate the PR" | `post_inline_review_comments` |
+| "Post comment on Jira" | `post_review_to_jira` |
+| "Export to Google Sheets" / "Add to spreadsheet" | `export_to_google_sheets` |
+| "Save to Drive" / "Save report" | `save_report_to_drive` |
+| "Generate test cases" / "Create regression sheet" | `generate_regression_sheet` |
+
+---
+
 ## Other Tool Usage
 
 | User asks... | Tool to call |
@@ -50,7 +68,8 @@ Always call `save_mr_analysis` after completing the review.
 | "What MRs are ready to merge?" | `list_team_analyses`, filter `ready_to_merge: true` |
 | "Show MRs reviewed this month" | `search_analyses` with `from: "2026-03-01"` |
 | "Find all rejected MRs this week" | `search_analyses` with `ready_to_merge: false`, `from/to` |
-| "Search reviews by date range" | `search_analyses` |
+| "Export team dashboard to Sheets" | `export_to_google_sheets` with `mode: "team_dashboard"` |
+| "Export regression tests to Sheets" | `export_to_google_sheets` with `mode: "regression_tests"` |
 
 ---
 
@@ -86,6 +105,40 @@ jira_id        : "PROJ-123"     (optional)
 analyst        : "ravi.sharma"  (optional — uses ANALYST_NAME env if omitted)
 ```
 
+### `post_review_to_slack`
+```
+mr_id          : "42"
+repo           : "owner/repo"
+review_summary : "<review text>"
+ready_to_merge : true | false
+jira_key       : "PROJ-123"     (optional)
+analyst        : "ravi.sharma"  (optional)
+```
+
+### `post_inline_review_comments`
+```
+mr_id    : "42"
+repo     : "owner/repo"
+platform : "github" | "gitlab"
+comments : [{ path: "src/auth.ts", line: 42, body: "Missing null check here" }]
+review_body : "AI Code Review"  (optional — header shown on the PR review)
+```
+
+### `export_to_google_sheets`
+```
+mode           : "regression_tests" | "team_dashboard"   (required)
+mr_id          : "42"           (required for regression_tests mode)
+repo           : "owner/repo"   (required for regression_tests mode)
+spreadsheet_id : "..."          (optional — overrides GOOGLE_SHEET_ID env)
+```
+
+### `save_report_to_drive`
+```
+mr_id     : "42"
+repo      : "owner/repo"
+folder_id : "..."   (optional — overrides GOOGLE_DRIVE_FOLDER_ID env)
+```
+
 ### `get_mr_analysis`
 ```
 mr_id   : "42"
@@ -110,6 +163,13 @@ repo           : "owner/repo"   (optional)
 limit          : 50             (max 200)
 ```
 
+### `generate_regression_sheet`
+```
+mr_id    : "42"
+repo     : "owner/repo"
+platform : "github" | "gitlab"
+```
+
 ---
 
 ## Output Format for Reviews
@@ -126,8 +186,8 @@ Structure every review response like this:
 <list of files with +/- counts>
 
 ### Acceptance Criteria Check
-- [ / ✅ / ❌ / ⚠️] <criterion 1>
-- [ / ✅ / ❌ / ⚠️] <criterion 2>
+- [✅ / ❌ / ⚠️] <criterion 1>
+- [✅ / ❌ / ⚠️] <criterion 2>
 
 ### Code Quality Notes
 <observations>
